@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Doon University — Smart Campus Navigator</title>
+
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <!-- Leaflet Routing Machine for real road routes -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.css" />
+  <script src="https://unpkg.com/leaflet-routing-machine@latest/dist/leaflet-routing-machine.js"></script>
+
+  <!-- QR Code library -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+
+  <style>
+    :root{
+      --accent: #009879;
+      --panel-bg: rgba(255,255,255,0.98);
+      --muted: #666;
+      --shadow: 0 6px 22px rgba(0,0,0,0.16);
+    }
+    html,body { height:100%; margin:0; font-family: "Poppins","Segoe UI",Arial; background:#f2f6f4; }
+    #map{ height:100vh; width:100%; }
+
+    /* Centered panel for desktop; floating for mobile */
+    .panel {
+      position: absolute;
+      top: 18px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 9999;
+      width: 460px;
+      background: var(--panel-bg);
+      border-radius: 12px;
+      padding: 14px 18px;
+      box-shadow: var(--shadow);
+      text-align:center;
+    }
+
+    .panel h3 { margin:4px 0 8px; color:var(--accent); font-weight:600; }
+    .row { display:flex; justify-content:space-between; gap:8px; margin:6px 0; align-items:center; }
+    select, input[type="text"], button {
+      height:40px;
+      border-radius:8px;
+      border:1px solid #d6d6d6;
+      padding:0 10px;
+      font-size:14px;
+    }
+    select, input[type="text"]{ flex:1; }
+    button { background:var(--accent); color:white; border:none; cursor:pointer; padding:0 14px; }
+    button.secondary { background:#1f8f77; }
+    .info { margin-top:8px; font-weight:600; color:#333; font-size:14px; }
+    .sub { color:var(--muted); font-weight:500; font-size:13px; margin-top:4px; }
+
+    /* progress bar */
+    .progress-wrap { width:100%; background:#eee; border-radius:10px; height:16px; overflow:hidden; margin-top:10px; display:none; }
+    .progress-bar { height:100%; width:0%; background:linear-gradient(90deg,#00c6ff,#0072ff); color:#fff; text-align:center; font-size:12px; line-height:16px; }
+
+    .credit {
+      position:absolute; right:12px; bottom:12px; z-index:9999;
+      background: rgba(255,255,255,0.9); padding:8px 10px; border-radius:8px; color:var(--muted); font-size:13px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    }
+
+    .leaflet-popup-content img { width:220px; height:auto; border-radius:8px; display:block; margin:6px 0; }
+
+    /* Welcome modal */
+    #welcomeOverlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,0.45); display:flex; align-items:center; justify-content:center; z-index:10050;
+    }
+    #welcomeBox {
+      width: 92%; max-width: 420px; background: white; border-radius: 12px; padding: 20px; text-align:center; box-shadow: 0 8px 30px rgba(0,0,0,0.25);
+    }
+    #welcomeBox h2 { color:var(--accent); margin:0 0 8px; }
+    #welcomeBox p { margin:0 0 16px; color:#444; }
+    #welcomeBox .welcome-actions { display:flex; gap:8px; justify-content:center; flex-wrap:wrap; }
+    #welcomeBox button { padding:10px 14px; border-radius:8px; border:none; cursor:pointer; }
+    #startNow { background: var(--accent); color:white; }
+    #dontShow { background:#f1f1f1; color:#333; }
+
+    /* Mobile polish: top-floating search & full-width controls */
+    @media (max-width: 760px) {
+      .panel {
+        left: 50%;
+        top: 12px;
+        transform: translateX(-50%);
+        width: 94%;
+        padding: 12px;
+        border-radius: 12px;
+        box-shadow: 0 6px 20px rgba(0,0,0,0.14);
+      }
+      .row { flex-direction: column; gap: 8px; }
+      select, input[type="text"], button { height:46px; font-size:16px; }
+      /* put search input as separate floating element near top (like Google maps) */
+      #mobileSearch {
+        position: fixed;
+        top: 8px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 94%;
+        max-width:420px;
+        z-index: 10001;
+        background: white;
+        padding: 8px 10px;
+        border-radius: 10px;
+        box-shadow: 0 6px 20px rgba(0,0,0,0.18);
+        display: none; /* shown on mobile via JS */
+      }
+      #mobileSearch input { width: 100%; border: none; outline:none; font-size:16px; }
+    }
+
+  </style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<!-- floating panel (desktop + mobile) -->
+<div class="panel" role="region" aria-label="Navigation panel">
+  <h3>Doon University — Navigator</h3>
+
+  <input id="searchInput" type="text" placeholder="Search building (type & press Enter)" aria-label="Search building" />
+
+  <div class="row">
+    <select id="startSel" aria-label="Start location"><option value="">Start</option></select>
+    <select id="endSel" aria-label="Destination"><option value="">Destination</option></select>
+  </div>
+
+  <div class="row">
+    <button id="generateQR">Generate QR Code</button>
+    <div id="qrContainer" style="margin-top:10px;"></div>
+  </div>
+
+  <div class="row">
+    <button id="routeBtn">Show Route</button>
+    <button id="locateBtn" class="secondary">Show My Location</button>
+  </div>
+
+  <div class="info" id="distanceInfo">Total: — m | Covered: — m | Remaining: — m</div>
+
+  <div class="progress-wrap" id="progressWrap">
+    <div class="progress-bar" id="progressBar">0%</div>
+  </div>
+
+  <div class="sub">Click a marker or search to see details & hear voice description.</div>
+</div>
+
+<!-- mobile-style floating search field (shown only on small screens) -->
+<div id="mobileSearch"><input id="mobileSearchInput" placeholder="Search building..." /></div>
+
+<div class="credit">By <strong>Bhoomi Chauhan</strong> — Doon University</div>
+
+<!-- Welcome modal -->
+<div id="welcomeOverlay" style="display:none;">
+  <div id="welcomeBox">
+    <h2>Smart Navigation</h2>
+    <p><em>Smart Navigation for a Smarter Campus</em></p>
+    <div class="welcome-actions">
+      <button id="startNow">Get started</button>
+      <button id="dontShow">Don't show again</button>
+    </div>
+  </div>
+</div>
+
+<script>
+/* -------------------------
+   Building data (same as your chosen set)
+   ------------------------- */
+const buildings = [
+  { name:"Main Gate", coords:[30.2830,77.9680], img:"static/images/main gate.jpg", desc:"Main entry to Doon University." },
+  { name:"Administrative Block", coords:[30.2835,77.9697], img:"static/images/adminstrative.jpg", desc:"Registrar & administrative offices." },
+  { name:"Library Building", coords:[30.2839,77.9702], img:"static/images/library.jpg", desc:"Central library,design dept, technology dept." },
+  { name:"Management Building", coords:[30.2841,77.9706], img:"static/images/mangement.jpg", desc:"Management & business studies." },
+  { name:"Faculty Offices", coords:[30.2833,77.9701], img:"static/images/faculty offices.jpg", desc:"Faculty cabins & departmental offices." },
+  { name:"Girls Hostel 1", coords:[30.2839,77.9686], img:"static/images/girls1.jpg", desc:"Girls Hostel Block 1." },
+  { name:"Girls Hostel 2", coords:[30.2835,77.9684], img:"static/images/girls2.jpg", desc:"Girls Hostel Block 2." },
+  { name:"Boys Hostel", coords:[30.2831,77.9682], img:"static/images/boyshostel.jpg", desc:"Boys Hostel near management." },
+  { name:"Composite Lab", coords:[30.2838,77.9710], img:"static/images/composite.jpeg", desc:"Labs for practical and(maths,CS,pyhsics,chemistry dept offices) ." },
+  { name:"Lecture Hall Complex", coords:[30.2832,77.9712], img:"static/images/lhc.jpeg", desc:"Classrooms and lecture halls pyschology dept and language dept." },
+  { name:"Nityanand Auditorium", coords:[30.2842,77.9709], img:"static/images/auditorium.jpg", desc:"Main auditorium for events,geology,geography,biological and theatre dept" },
+];
+
+/* -------------------------
+   Map initialize
+   ------------------------- */
+const map = L.map('map', { zoomControl:true }).setView([30.2837,77.9695], 17);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { attribution:'© OpenStreetMap' }).addTo(map);
+
+/* -------------------------
+   UI elements
+   ------------------------- */
+const startSel = document.getElementById('startSel');
+const endSel = document.getElementById('endSel');
+const searchInput = document.getElementById('searchInput');
+const mobileSearchInput = document.getElementById('mobileSearchInput');
+const routeBtn = document.getElementById('routeBtn');
+const locateBtn = document.getElementById('locateBtn');
+const distanceInfo = document.getElementById('distanceInfo');
+const progressWrap = document.getElementById('progressWrap');
+const progressBar = document.getElementById('progressBar');
+const qrContainer = document.getElementById('qrContainer');
+
+/* -------------------------
+   Populate selects + markers
+   ------------------------- */
+const markers = {};
+buildings.forEach(b => {
+  const popup = `<b>${b.name}</b><br><small style="color:#555">${b.desc}</small>${b.img ? `<br><img src="${b.img}" alt="${b.name}">` : ''}`;
+  const m = L.marker(b.coords).addTo(map).bindPopup(popup);
+  m.on('click', () => {
+    speak(`${b.name}. ${b.desc}`);
+  });
+  markers[b.name] = m;
+
+  startSel.add(new Option(b.name, b.name));
+  endSel.add(new Option(b.name, b.name));
+});
+
+/* -------------------------
+   Voice helper
+   ------------------------- */
+function speak(text) {
+  if (!('speechSynthesis' in window)) return;
+  window.speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = 'en-IN';
+  u.rate = 1;
+  u.pitch = 1;
+  window.speechSynthesis.speak(u);
+}
+
+// Allow voice after first user interaction (browser requirement)
+document.body.addEventListener('click', function enableVoiceOnce() {
+  // small no-op to unlock speech on some browsers
+  try { window.speechSynthesis.cancel(); } catch(e){}
+  document.body.removeEventListener('click', enableVoiceOnce);
+});
+
+/* -------------------------
+   Routing & progress logic
+   ------------------------- */
+let routeControl = null;
+let totalMeters = 0;
+let watchId = null;
+let announceIntervalId = null;
+let lastAnnouncedRemaining = null;
+
+// Helper to clear previous route (both control and polyline)
+function clearRoute() {
+  if (routeControl) { map.removeControl(routeControl); routeControl = null; }
+  totalMeters = 0;
+  progressWrap.style.display = 'none';
+  progressBar.style.width = '0%';
+  progressBar.innerText = '0%';
+  distanceInfo.textContent = 'Total: — m | Covered: — m | Remaining: — m';
+  stopWatching();
+}
+
+routeBtn.addEventListener('click', () => {
+  const startName = startSel.value;
+  const endName = endSel.value;
+  if (!startName || !endName) { alert('Select both Start and Destination'); return; }
+  if (startName === endName) { alert('Start and Destination are same'); return; }
+
+  const start = buildings.find(b => b.name === startName);
+  const end = buildings.find(b => b.name === endName);
+  if (!start || !end) return;
+
+  // remove old route
+  if (routeControl) map.removeControl(routeControl);
+
+  // Use OSRM routing for realistic route
+  routeControl = L.Routing.control({
+    waypoints: [
+      L.latLng(start.coords[0], start.coords[1]),
+      L.latLng(end.coords[0], end.coords[1])
+    ],
+    router: new L.Routing.OSRMv1({ serviceUrl: 'https://router.project-osrm.org/route/v1' }),
+    routeWhileDragging: false,
+    lineOptions: {
+      styles: [{ color: '#009879', weight: 5, opacity: 0.9 }]
+    },
+    createMarker: function() { return null; },
+    addWaypoints: false,
+    show: false
+  }).addTo(map);
+
+  // When a route is found, set totalMeters from the route summary (if available)
+  routeControl.on('routesfound', function(e) {
+    try {
+      const routes = e.routes;
+      if (routes && routes.length > 0 && routes[0].summary && routes[0].summary.totalDistance !== undefined) {
+        totalMeters = routes[0].summary.totalDistance; // meters (OSRM returns meters)
+      } else if (routes && routes.length > 0 && routes[0].summary && routes[0].summary.totalLength !== undefined) {
+        totalMeters = routes[0].summary.totalLength;
+      } else {
+        // fallback to straight-line distance
+        totalMeters = map.distance( L.latLng(start.coords), L.latLng(end.coords) );
+      }
+    } catch (err) {
+      totalMeters = map.distance( L.latLng(start.coords), L.latLng(end.coords) );
+    }
+
+    distanceInfo.textContent = `Total: ${Math.round(totalMeters)} m | Covered: 0 m | Remaining: ${Math.round(totalMeters)} m`;
+    progressWrap.style.display = 'block';
+    progressBar.style.width = '0%';
+    progressBar.innerText = '0%';
+
+    const total_m = Math.round(totalMeters);
+    const msg = `Navigating from ${startName} to ${endName}. Distance is ${total_m} meters.`;
+    speak(msg);
+    // start watching user position to update progress
+    startWatching();
+  });
+
+  // Fit bounds will be automatically handled but force a slight fit after a short delay in case route takes a moment
+  setTimeout(() => {
+    if (routeControl) {
+      const rb = routeControl.getPlan && routeControl.getPlan();
+      // routeControl will adjust view; if not, just ensure center
+    }
+  }, 800);
+});
+
+/* -------------------------
+   Search (Enter to search) - wired for desktop search input
+   ------------------------- */
+searchInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    doSearch(searchInput.value);
+  }
+});
+mobileSearchInput && mobileSearchInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') {
+    doSearch(mobileSearchInput.value);
+  }
+});
+function doSearch(qraw) {
+  const q = (qraw || '').trim().toLowerCase();
+  if (!q) return;
+  const found = buildings.find(b => b.name.toLowerCase().includes(q));
+  if (!found) { alert('Building not found'); return; }
+  map.setView(found.coords, 18);
+  markers[found.name].openPopup();
+  speak(`${found.name}. ${found.desc}`);
+}
+
+/* -------------------------
+   Location & tracking
+   ------------------------- */
+function startWatching() {
+  if (!('geolocation' in navigator)) { speak('Geolocation not supported'); return; }
+  // if already watching, keep it
+  if (watchId !== null) return;
+
+  watchId = navigator.geolocation.watchPosition(onPositionUpdate, geoError, {
+    enableHighAccuracy: true,
+    maximumAge: 1000,
+    timeout: 10000
+  });
+
+  // set periodic announcements every 20s
+  lastAnnouncedRemaining = null;
+  announceIntervalId = setInterval(periodicAnnouncement, 20000);
+}
+
+function stopWatching() {
+  if (watchId !== null) {
+    navigator.geolocation.clearWatch(watchId);
+    watchId = null;
+  }
+  if (announceIntervalId !== null) {
+    clearInterval(announceIntervalId);
+    announceIntervalId = null;
+  }
+  lastAnnouncedRemaining = null;
+}
+
+locateBtn.addEventListener('click', () => {
+  if (!('geolocation' in navigator)) { alert('Geolocation not supported'); return; }
+  // single locate + start watching for updates (also used for progress)
+  map.locate({ setView:true, maxZoom:18 });
+  speak('Locating your position...');
+  // also start watching (so progress updates if route active)
+  startWatching();
+});
+
+function onPositionUpdate(pos) {
+  const lat = pos.coords.latitude;
+  const lon = pos.coords.longitude;
+  const acc = pos.coords.accuracy || 20;
+
+  // place or update user marker
+  if (!window.userMarker) {
+    window.userMarker = L.circleMarker([lat, lon], { radius:8, color:'#fff', fillColor:'#007bff', fillOpacity:0.9, weight:2 }).addTo(map);
+    window.userCircle = L.circle([lat, lon], { radius: acc, color:'#007bff', opacity:0.15 }).addTo(map);
+  } else {
+    window.userMarker.setLatLng([lat, lon]);
+    window.userCircle.setLatLng([lat, lon]);
+    window.userCircle.setRadius(acc);
+  }
+
+  // If route control exists, try to find nearest point on the route to compute remaining distance
+  if (routeControl && totalMeters > 0) {
+    // try to get route coordinates (if available)
+    const routes = routeControl && routeControl._routes ? routeControl._routes : null;
+    let routeEndLatLng = null;
+    if (routes && routes.length > 0 && routes[0].coordinates && routes[0].coordinates.length > 0) {
+      const endCoord = routes[0].coordinates[routes[0].coordinates.length - 1];
+      routeEndLatLng = L.latLng(endCoord.lat, endCoord.lng);
+    }
+    // fallback to waypoints last point
+    if (!routeEndLatLng && routeControl && routeControl.getWaypoints) {
+      const wp = routeControl.getWaypoints();
+      if (wp && wp.length > 0) {
+        const last = wp[wp.length - 1];
+        if (last && last.latLng) routeEndLatLng = last.latLng;
+      }
+    }
+
+    // compute remaining using available end point
+    if (routeEndLatLng) {
+      const current = L.latLng(lat, lon);
+      const remaining = current.distanceTo(routeEndLatLng); // meters (approx)
+      const covered = Math.max(totalMeters - remaining, 0);
+
+      const remainingRounded = Math.round(remaining);
+      const coveredRounded = Math.round(covered);
+      const totalRounded = Math.round(totalMeters);
+
+      distanceInfo.textContent = `Total: ${totalRounded} m | Covered: ${coveredRounded} m | Remaining: ${remainingRounded} m`;
+
+      // progress percent
+      const percent = Math.max(0, Math.min((covered / totalMeters) * 100, 100));
+      progressBar.style.width = percent.toFixed(1) + '%';
+      progressBar.innerText = Math.round(percent) + '%';
+
+      // arrival
+      if (remaining <= 8) {
+        speak('You have reached your destination.');
+        clearRouteAfterArrival();
+      }
+    }
+  }
+}
+
+function clearRouteAfterArrival() {
+  stopWatching();
+  progressBar.style.width = '100%';
+  progressBar.innerText = '100%';
+  distanceInfo.textContent = distanceInfo.textContent.replace('Remaining:','Remaining: 0 m |');
+  setTimeout(() => {
+    if (routeControl) { map.removeControl(routeControl); routeControl = null; }
+  }, 3000);
+}
+
+function geoError(err) {
+  console.warn('Geolocation error', err);
+  if (err && err.code === 1) speak('Location permission denied. Please allow location access.');
+}
+
+/* -------------------------
+   Periodic announcements while route active
+   ------------------------- */
+function periodicAnnouncement() {
+  if (!routeControl || totalMeters <= 0 || !window.userMarker) return;
+  // Try to estimate remaining
+  const userLatLng = window.userMarker.getLatLng();
+  let routeEnd = null;
+  const routes = routeControl && routeControl._routes ? routeControl._routes : null;
+  if (routes && routes.length > 0 && routes[0].coordinates && routes[0].coordinates.length > 0) {
+    const last = routes[0].coordinates[routes[0].coordinates.length - 1];
+    routeEnd = L.latLng(last.lat, last.lng);
+  } else if (routeControl && routeControl.getWaypoints) {
+    const wp = routeControl.getWaypoints();
+    if (wp && wp.length > 0) routeEnd = wp[wp.length-1].latLng;
+  }
+  if (!routeEnd) return;
+  const remaining = Math.round(userLatLng.distanceTo(routeEnd));
+  const covered = Math.max(Math.round(totalMeters - remaining), 0);
+
+  if (lastAnnouncedRemaining === null || Math.abs(lastAnnouncedRemaining - remaining) >= 20) {
+    if (remaining > 8) {
+      const msg = `Update: you have covered ${covered} meters. ${remaining} meters remaining.`;
+      speak(msg);
+      lastAnnouncedRemaining = remaining;
+    }
+  }
+}
+
+/* -------------------------
+   Wire controls & mobile search visibility
+   ------------------------- */
+document.getElementById('routeBtn').addEventListener('click', () => {
+  // routeBtn logic is already set above via same listener - no duplication
+  // This simple passthrough ensures any UI click triggers the same behavior (keeps compatibility)
+});
+
+function updateSearchVisibility() {
+  const ms = document.getElementById('mobileSearch');
+  if (!ms) return;
+  if (window.innerWidth <= 760) {
+    ms.style.display = 'block';
+    document.getElementById('searchInput').style.display = 'none';
+  } else {
+    ms.style.display = 'none';
+    document.getElementById('searchInput').style.display = 'block';
+  }
+}
+window.addEventListener('resize', updateSearchVisibility);
+updateSearchVisibility();
+
+/* -------------------------
+   Welcome modal logic (remembers don't-show in localStorage)
+   ------------------------- */
+const welcomeOverlay = document.getElementById('welcomeOverlay');
+const startNowBtn = document.getElementById('startNow');
+const dontShowBtn = document.getElementById('dontShow');
+
+function showWelcomeIfNeeded() {
+  try {
+    const hide = localStorage.getItem('skipWelcome_v1');
+    if (!hide) {
+      welcomeOverlay.style.display = 'flex';
+    }
+  } catch (e) {
+    welcomeOverlay.style.display = 'flex';
+  }
+}
+startNowBtn.addEventListener('click', () => {
+  welcomeOverlay.style.display = 'none';
+  speak('Welcome to Smart Navigation for a Smarter Campus. Select a start and destination or search for a building to begin.');
+});
+dontShowBtn.addEventListener('click', () => {
+  try { localStorage.setItem('skipWelcome_v1', '1'); } catch(e) {}
+  welcomeOverlay.style.display = 'none';
+  speak('Welcome saved. You can access navigation controls from the top panel.');
+});
+showWelcomeIfNeeded();
+
+/* -------------------------
+   QR generation (full route) & QR param handling
+   ------------------------- */
+document.getElementById('generateQR').addEventListener('click', () => {
+  const s = startSel.value;
+  const e = endSel.value;
+  if (!s || !e) { alert('Select both start and destination to generate a QR for the route.'); return; }
+
+  // Construct share URL with both start & end as params
+  const base = window.location.origin + window.location.pathname;
+  const url = `${base}?start=${encodeURIComponent(s)}&end=${encodeURIComponent(e)}`;
+
+  qrContainer.innerHTML = '';
+  new QRCode(qrContainer, {
+    text: url,
+    width: 160,
+    height: 160,
+    colorDark: "#000000",
+    colorLight: "#ffffff",
+    correctLevel: QRCode.CorrectLevel.H
+  });
+
+  speak('QR code generated for the full route. Scan to open this route on mobile.');
+});
+
+// If page opened with params (?start=...&end=...), auto-select and show route
+(function handleParamsOnLoad() {
+  const params = new URLSearchParams(window.location.search);
+  const startParam = params.get('start');
+  const endParam = params.get('end');
+
+  if (startParam) {
+    const foundStart = buildings.find(b => b.name.toLowerCase() === startParam.toLowerCase());
+    if (foundStart) startSel.value = foundStart.name;
+  }
+  if (endParam) {
+    const foundEnd = buildings.find(b => b.name.toLowerCase() === endParam.toLowerCase());
+    if (foundEnd) endSel.value = foundEnd.name;
+  }
+
+  // If both present, automatically trigger a route
+  if (startParam && endParam) {
+    // small delay to ensure UI is ready
+    setTimeout(() => {
+      // simulate click on route button
+      const event = new Event('click');
+      routeBtn.dispatchEvent(event);
+    }, 900);
+  }
+})();
+
+/* -------------------------
+   Initial greeting
+   ------------------------- */
+speak('Smart Campus Navigator loaded. Select Start and Destination or search a building to begin.');
+</script>
+
+</body>
+</html>

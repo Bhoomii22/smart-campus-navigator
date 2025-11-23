@@ -1,0 +1,57 @@
+body {
+    margin: 0;
+    padding: 0;
+    background: url('https://doonuniversity.ac.in/uploads/banner/DU_Main_Building.jpg') no-repeat center center fixed;
+    background-size: cover;
+    font-family: 'Segoe UI', Tahoma, sans-serif;
+}
+
+.overlay {
+    height: 100vh;
+    width: 100vw;
+    background-color: rgba(0,0,0,0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.card {
+    background-color: rgba(255, 255, 255, 0.9);
+    padding: 30px 40px;
+    border-radius: 20px;
+    box-shadow: 0 0 15px rgba(0,0,0,0.3);
+    width: 400px;
+    text-align: center;
+}
+
+.card h1 {
+    color: #1a5c9a;
+    margin-bottom: 20px;
+}
+
+select, button {
+    width: 90%;
+    padding: 10px;
+    margin: 10px 0;
+    border-radius: 10px;
+    border: 1px solid #ccc;
+    font-size: 16px;
+}
+
+button {
+    background-color: #1a5c9a;
+    color: white;
+    cursor: pointer;
+    transition: 0.3s;
+}
+
+button:hover {
+    background-color: #0f3f6b;
+}
+
+.result-box {
+    margin-top: 15px;
+    padding: 10px;
+    background: rgba(255,255,255,0.8);
+    border-radius: 10px;
+}
